@@ -1,0 +1,24 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16
+    container_name: sample-postgres
+    environment:
+      POSTGRES_DB: appdb          # 作成するDB名
+      POSTGRES_USER: appuser      # ユーザー名
+      POSTGRES_PASSWORD: apppass  # パスワード
+      TZ: Asia/Tokyo
+    ports:
+      - "5433:5432"               # ← 5433番をホストに公開（5432競合防止）
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d appdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
+

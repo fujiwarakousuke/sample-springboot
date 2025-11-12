@@ -1,0 +1,238 @@
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<!doctype html>
+<html lang="ja">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Book Manager</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { padding: 24px; }
+        .pointer { cursor: pointer; }
+        .table thead th { white-space: nowrap; }
+        .modal input { width: 100%; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1 class="mb-4">📚 Book Manager</h1>
+
+    <!-- 操作用ヘッダ -->
+    <div class="row g-2 align-items-end mb-3">
+        <div class="col-sm-4">
+            <label class="form-label">キーワード検索（タイトル）</label>
+            <input id="q" type="text" class="form-control" placeholder="例: java">
+        </div>
+        <div class="col-sm-2">
+            <label class="form-label">件数</label>
+            <select id="size" class="form-select">
+                <option>5</option><option selected>10</option><option>20</option><option>50</option>
+            </select>
+        </div>
+        <div class="col-sm-3">
+            <label class="form-label">並び順</label>
+            <select id="sort" class="form-select">
+                <option value="createdAt,desc">作成日 ↓</option>
+                <option value="createdAt,asc">作成日 ↑</option>
+                <option value="title,asc">タイトル A→Z</option>
+                <option value="title,desc">タイトル Z→A</option>
+                <option value="price,asc">価格 安→高</option>
+                <option value="price,desc">価格 高→安</option>
+            </select>
+        </div>
+        <div class="col-sm-3 text-end">
+            <button id="btnSearch" class="btn btn-primary me-2">検索 / 更新</button>
+            <button id="btnNew" class="btn btn-success">新規登録</button>
+        </div>
+    </div>
+
+    <!-- メッセージ -->
+    <div id="msg" class="alert d-none" role="alert"></div>
+
+    <!-- 一覧 -->
+    <div class="table-responsive">
+        <table class="table table-striped align-middle">
+            <thead>
+            <tr>
+                <th>ID</th>
+                <th class="pointer" data-sort="title">タイトル</th>
+                <th>著者</th>
+                <th class="pointer" data-sort="price">価格</th>
+                <th>作成日</th>
+                <th>更新日</th>
+                <th>操作</th>
+            </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+        </table>
+    </div>
+
+    <!-- ページング -->
+    <nav>
+        <ul id="pager" class="pagination justify-content-center"></ul>
+    </nav>
+</div>
+
+<!-- 登録/編集モーダル -->
+<div class="modal fade" id="editModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <form id="editForm" class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalTitle">新規登録</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="bookId">
+                <div class="mb-3">
+                    <label class="form-label">タイトル <span class="text-danger">*</span></label>
+                    <input id="title" class="form-control" maxlength="120" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">著者 <span class="text-danger">*</span></label>
+                    <input id="author" class="form-control" maxlength="80" required>
+                </div>
+                <div class="mb-1">
+                    <label class="form-label">価格（円）</label>
+                    <input id="price" type="number" min="0" step="1" class="form-control">
+                </div>
+                <div class="form-text">* は必須</div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">閉じる</button>
+                <button id="btnSave" type="submit" class="btn btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // 画面状態
+      let state = { page: 0, size: 10, sort: 'createdAt,desc', q: '' };
+
+      // ← ここで初めて要素を取得する（DOM 構築後なので null にならない）
+      const tbody = document.getElementById('tbody');
+      const pager = document.getElementById('pager');
+      const msg   = document.getElementById('msg');
+
+      function showMsg(text, type='info'){ msg.className=`alert alert-${type}`; msg.textContent=text; msg.classList.remove('d-none'); setTimeout(()=>msg.classList.add('d-none'),2500); }
+      function fmtDate(s){ if(!s) return ''; try{ return new Date(s).toLocaleString(); }catch{ return s; } }
+
+      async function load(){
+        const params = new URLSearchParams();
+        if (state.q) params.set('q', state.q);
+        params.set('page', state.page); params.set('size', state.size); params.set('sort', state.sort);
+        const res = await fetch(`/api/books?${params}`);
+        if(!res.ok){ showMsg(`一覧取得に失敗しました (${res.status})`, 'danger'); return; }
+        const data = await res.json();
+        renderTable(data.content || []);
+        renderPager(data.number ?? state.page, data.totalPages ?? 1);
+      }
+
+      function renderTable(rows){
+        tbody.innerHTML = rows.map(r => `
+          <tr>
+            <td>${r.id ?? ''}</td>
+            <td>${escapeHtml(r.title ?? '')}</td>
+            <td>${escapeHtml(r.author ?? '')}</td>
+            <td class="text-end">${r.price ?? ''}</td>
+            <td>${fmtDate(r.createdAt)}</td>
+            <td>${fmtDate(r.updatedAt)}</td>
+            <td class="text-nowrap">
+              <button class="btn btn-sm btn-outline-primary me-1" onclick="openEdit(${r.id}, '${attr(r.title)}', '${attr(r.author)}', ${r.price ?? 'null'})">編集</button>
+              <button class="btn btn-sm btn-outline-danger" onclick="removeBook(${r.id})">削除</button>
+            </td>
+          </tr>
+        `).join('');
+      }
+
+      function renderPager(current, totalPages){
+        pager.innerHTML = '';
+        const ul = pager;
+        function li(disabled, active, label, page){
+          const li = document.createElement('li'); li.className='page-item'+(disabled?' disabled':'')+(active?' active':'');
+          const a = document.createElement('a'); a.className='page-link'; a.href='#'; a.textContent=label;
+          a.onclick = e=>{ e.preventDefault(); if(!disabled){ state.page=page; load(); } };
+          li.appendChild(a); ul.appendChild(li);
+        }
+        li(current===0,false,'«',0); li(current===0,false,'‹',Math.max(0,current-1));
+        const w=3, start=Math.max(0,current-w), end=Math.min(totalPages-1,current+w);
+        for(let p=start;p<=end;p++) li(false,p===current,(p+1).toString(),p);
+        li(current>=totalPages-1,false,'›',Math.min(totalPages-1,current+1));
+        li(current>=totalPages-1,false,'»',totalPages-1);
+      }
+
+      // --- モーダルは遅延生成 ---
+      let editModal;
+      function ensureModal(){
+        if(!editModal){
+          const el = document.getElementById('editModal');
+          editModal = new bootstrap.Modal(el); // ← 文字列ではなく要素を渡す
+        }
+      }
+
+      document.getElementById('btnNew').addEventListener('click', () => openEdit());
+
+      window.openEdit = function(id=null, title='', author='', price=''){
+        ensureModal();
+        document.getElementById('modalTitle').textContent = id ? `編集 #${id}` : '新規登録';
+        document.getElementById('bookId').value = id ?? '';
+        document.getElementById('title').value = title ?? '';
+        document.getElementById('author').value = author ?? '';
+        document.getElementById('price').value = (price ?? '') === null ? '' : (price ?? '');
+        editModal.show();
+      }
+
+      document.getElementById('editForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const id = document.getElementById('bookId').value.trim();
+        const payload = { title: val('title'), author: val('author'), price: numOrNull('price') };
+        if(!payload.title || !payload.author){ showMsg('タイトルと著者は必須です', 'warning'); return; }
+        const res = await fetch(id?`/api/books/${id}`:'/api/books', {
+          method: id?'PATCH':'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
+        });
+        if(res.ok){ ensureModal(); editModal.hide(); showMsg('保存しました','success'); load(); }
+        else{ let m=`保存に失敗しました (${res.status})`; try{const j=await res.json(); if(j.message) m+=`: ${j.message}`; if(j.errors) m+=' '+JSON.stringify(j.errors);}catch{}; showMsg(m,'danger'); }
+      });
+
+      window.removeBook = async function(id){
+        if(!confirm(`ID=${id} を削除します。よろしいですか？`)) return;
+        const res = await fetch(`/api/books/${id}`, { method:'DELETE' });
+        if(res.ok){ showMsg('削除しました','success'); if(tbody.children.length===1 && state.page>0) state.page--; load(); }
+        else { showMsg(`削除に失敗しました (${res.status})`, 'danger'); }
+      }
+
+      document.querySelectorAll('th.pointer').forEach(th=>{
+        th.addEventListener('click', ()=>{
+          const key = th.dataset.sort; const [curKey,curDir]=state.sort.split(',');
+          const dir = (curKey===key && curDir==='asc')?'desc':'asc';
+          state.sort = `${key},${dir}`; state.page=0; load();
+        });
+      });
+
+      document.getElementById('btnSearch').addEventListener('click', ()=>{
+        state.q = document.getElementById('q').value.trim();
+        state.size = parseInt(document.getElementById('size').value,10);
+        state.sort = document.getElementById('sort').value;
+        state.page = 0; load();
+      });
+
+      function val(id){ return document.getElementById(id).value.trim(); }
+      function numOrNull(id){ const v=document.getElementById(id).value.trim(); if(v==='') return null; const n=Number(v); return Number.isFinite(n)&&n>=0?n:null; }
+      function escapeHtml(s){ return (s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+      function attr(s){ return (s??'').replace(/['"\\]/g,m=>'\\'+m); }
+
+      // 初期表示
+      (function init(){
+        document.getElementById('size').value=String(state.size);
+        document.getElementById('sort').value=state.sort;
+        load();
+      })();
+    }); // DOMContentLoaded
+</script>
+
+</body>
+</html>
+
